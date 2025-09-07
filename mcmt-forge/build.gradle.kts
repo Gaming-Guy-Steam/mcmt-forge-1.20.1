@@ -1,4 +1,3 @@
-// mcmt-forge/build.gradle.kts
 plugins {
     id("net.minecraftforge.gradle") version "6.0.24"
     kotlin("jvm")
@@ -30,7 +29,18 @@ dependencies {
     implementation(project(":mcmt-core"))
 }
 
-// Zorg dat 'build' ook de reobfJar uitvoert
+// Neem de mcmt-core source direct op in de Forge build
+sourceSets {
+    main {
+        java {
+            srcDir("../mcmt-core/src/main/java")
+        }
+        resources {
+            srcDir("../mcmt-core/src/main/resources")
+        }
+    }
+}
+
 tasks {
     build {
         dependsOn("reobfJar")
