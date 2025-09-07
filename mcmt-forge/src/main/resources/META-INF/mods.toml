@@ -1,21 +1,31 @@
 modLoader="javafml"
-loaderVersion="[47,)"
-license="Apache-2.0"
+loaderVersion="[47,)" # Forge 1.20.1 uses loader version 47.x
+license="MCMT Source-Available License v1.0"
 
 [[mods]]
 modId="mcmt"
 version="${file.jarVersion}"
 displayName="MCMT"
-description="Multithreaded tick scheduler with safe side-effect application."
+updateJSONURL=""
+displayURL=""
+logoFile=""
+credits="Developed by Sietse"
+authors="Sietse"
+description='''
+MCMT forces Minecraft to run tick loops in parallel, with a safe main-thread apply phase for side-effects.
+It keeps the main thread as clean as possible, blacklists crash-prone loops, and balances load across all CPU cores.
+'''
 
 [[dependencies.mcmt]]
 modId="forge"
 mandatory=true
 versionRange="[47,)"
+ordering="NONE"
 side="BOTH"
 
 [[dependencies.mcmt]]
 modId="minecraft"
 mandatory=true
-versionRange="[1.20.1,1.20.2)"
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
 side="BOTH"

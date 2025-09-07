@@ -1,0 +1,10 @@
+{
+  "command.mcmt.summary": "MCMT summary written to console; sent to you in chat.",
+  "command.mcmt.logger.start": "MCMT logger started.",
+  "command.mcmt.logger.stop": "MCMT logger stopped.",
+  "command.mcmt.threads.current.set": "Set current session threads to %s.",
+  "command.mcmt.threads.always.set": "Set maximum threads permanently to %s.",
+  "command.mcmt.create.csv": "CSV log file created.",
+  "command.mcmt.error.permission": "You do not have permission to run this command.",
+  "command.mcmt.error.invalid": "Invalid command usage."
+}

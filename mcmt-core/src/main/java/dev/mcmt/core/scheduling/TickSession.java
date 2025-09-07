@@ -65,6 +65,7 @@ public final class TickSession {
             .thenComparingInt(u -> u.chunkX)
             .thenComparingInt(u -> u.chunkZ)
             .thenComparingInt(u -> domainOrder(u.domain))
+            
     );
     return list;
 }

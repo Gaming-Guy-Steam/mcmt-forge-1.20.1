@@ -1,0 +1,10 @@
+{
+  "command.mcmt.summary": "MCMT samenvatting naar de console geschreven; in de chat naar jou verstuurd.",
+  "command.mcmt.logger.start": "MCMT logger gestart.",
+  "command.mcmt.logger.stop": "MCMT logger gestopt.",
+  "command.mcmt.threads.current.set": "Aantal threads voor huidige sessie ingesteld op %s.",
+  "command.mcmt.threads.always.set": "Maximaal aantal threads permanent ingesteld op %s.",
+  "command.mcmt.create.csv": "CSV-logbestand aangemaakt.",
+  "command.mcmt.error.permission": "Je hebt geen toestemming om dit commando uit te voeren.",
+  "command.mcmt.error.invalid": "Ongeldig gebruik van commando."
+}
