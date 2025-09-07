@@ -1,0 +1,21 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="Apache-2.0"
+
+[[mods]]
+modId="mcmt"
+version="${file.jarVersion}"
+displayName="MCMT"
+description="Multithreaded tick scheduler with safe side-effect application."
+
+[[dependencies.mcmt]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+side="BOTH"
+
+[[dependencies.mcmt]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.20.2)"
+side="BOTH"
