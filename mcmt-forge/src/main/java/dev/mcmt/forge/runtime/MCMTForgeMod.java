@@ -2,7 +2,10 @@ package dev.mcmt.forge.runtime;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import dev.mcmt.core.scheduling.AdapterRegistry;
+import dev.mcmt.core.tick.TickOrchestrator;
 import dev.mcmt.forge.integration.ForgeSideEffectContext;
+import dev.mcmt.forge.integration.mekanism.MekFactoryAdapter;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.Registries;
@@ -46,6 +49,7 @@ public final class MCMTForgeMod {
             }
         );
 
+        MinecraftForge.EVENT_BUS.addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStopping);
         MinecraftForge.EVENT_BUS.addListener(this::onServerTick);
@@ -64,6 +68,9 @@ public final class MCMTForgeMod {
                 System.out.println("[MCMT] First run detected. Setting maxThreads to "
                         + suggested + " (cores: " + cores + ", reserved: " + DEFAULT_THREAD_RESERVE + ")");
             }
+
+            // ✅ Registreer Mekanism Factory adapter
+            AdapterRegistry.register(new MekFactoryAdapter());
         });
     }
 
@@ -134,23 +141,28 @@ public final class MCMTForgeMod {
             return server.getLevel(key);
         });
 
+        // Maak orchestrator met blacklist en logger
         this.orchestrator = new TickOrchestrator(
-            workers,
-            () -> listLevelsSnapshot(server),
-            (levelView, proxy, submit) -> {
-                // Parallel werk hier
-            },
-            ctx
+            Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE,
+            new dev.mcmt.core.blacklist.BlacklistManager(),
+            msg -> System.out.println("[MCMT] " + msg)
         );
-    }
 
-    private static List<TickOrchestrator.LevelView> listLevelsSnapshot(MinecraftServer server) {
-        List<TickOrchestrator.LevelView> out = new ArrayList<>();
-        for (ServerLevel lvl : server.getAllLevels()) {
-            String id = lvl.dimension().location().toString();
-            out.add(new TickOrchestrator.LevelView(id, lvl));
-        }
-        return out;
+        // Voorbeeld BE‑tick loop integratie
+        MinecraftForge.EVENT_BUS.addListener((TickEvent.LevelTickEvent ev) -> {
+            if (ev.phase == TickEvent.Phase.START || !(ev.level instanceof ServerLevel sl)) return;
+
+            var frame = orchestrator.beginTick();
+            for (var be : sl.blockEntityList) {
+                String beKey = be.getType().toString() + "@" +
+                               be.getBlockPos().getX() + "," +
+                               be.getBlockPos().getY() + "," +
+                               be.getBlockPos().getZ();
+                Runnable defaultTick = be::tick;
+                orchestrator.submitWithAdapter(frame, beKey, be, defaultTick);
+            }
+            orchestrator.endTick(frame, ctx);
+        });
     }
 
     private void onServerStopping(ServerStoppingEvent e) {
@@ -160,13 +172,6 @@ public final class MCMTForgeMod {
     }
 
     private void onServerTick(TickEvent.ServerTickEvent e) {
-        if (orchestrator == null) return;
-        if (e.phase == TickEvent.Phase.START) {
-            orchestrator.beginTick();
-            MCMTLogger.log("Tick start");
-        } else {
-            orchestrator.endTick();
-            MCMTLogger.log("Tick end");
-        }
+        // Als je globale server‑taken wilt doen, kan dat hier
     }
 }

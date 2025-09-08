@@ -6,6 +6,8 @@ import dev.mcmt.core.comms.MessageBus;
 import dev.mcmt.core.effects.SideEffectApplier;
 import dev.mcmt.core.effects.SideEffectBuffer;
 import dev.mcmt.core.effects.SideEffectContext;
+import dev.mcmt.core.scheduling.AdapterRegistry;
+import dev.mcmt.core.scheduling.UnsafeParallelAdapter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +18,9 @@ import java.util.function.Consumer;
 /**
  * Orchestrator that executes per-tick worker tasks, applies blacklisting,
  * and applies side-effects on the main thread via a SideEffectContext.
+ * 
+ * Extended with adapter support: snapshot on main, compute in parallel,
+ * and commit on main (before side-effects).
  */
 public final class TickOrchestrator implements AutoCloseable {
 
@@ -26,7 +31,8 @@ public final class TickOrchestrator implements AutoCloseable {
 
     // Per-tick state
     private final ThreadLocal<List<Runnable>> fallbackLocal = ThreadLocal.withInitial(ArrayList::new);
-    private final ThreadLocal<List<Future<?>>> futuresLocal = ThreadLocal.withInitial(ArrayList::new);
+    private final ThreadLocal<List<Runnable>> commitsLocal  = ThreadLocal.withInitial(ArrayList::new);
+    private final ThreadLocal<List<Future<?>>> futuresLocal  = ThreadLocal.withInitial(ArrayList::new);
 
     public TickOrchestrator(int threads, BlacklistManager blacklist, Consumer<String> logger) {
         this.pool = Executors.newFixedThreadPool(threads, r -> {
@@ -41,6 +47,7 @@ public final class TickOrchestrator implements AutoCloseable {
 
     public TickFrame beginTick() {
         fallbackLocal.set(new ArrayList<>());
+        commitsLocal.set(new ArrayList<>());
         futuresLocal.set(new ArrayList<>());
         SideEffectBuffer buffer = new SideEffectBuffer();
         MessageBus bus = new MessageBus();
@@ -65,6 +72,71 @@ public final class TickOrchestrator implements AutoCloseable {
         futuresLocal.get().add(f);
     }
 
+    /**
+     * Submit a block entity using an UnsafeParallelAdapter if available.
+     * Flow: snapshot (main) -> compute (parallel) -> commit (main, before side-effects).
+     *
+     * @param frame       current tick frame
+     * @param key         unique id for blacklist/crash tracking (e.g. "<modid>:<type>@x,y,z")
+     * @param be          the block entity instance
+     * @param defaultUnit fallback runnable for the normal (single-thread) tick if no adapter is found or snapshot fails
+     */
+    @SuppressWarnings("unchecked")
+    public <T> void submitWithAdapter(TickFrame frame, String key, T be, Runnable defaultUnit) {
+        // Respect existing blacklist first
+        if (blacklist.isBlacklisted(key)) {
+            fallbackLocal.get().add(wrapSafeMain(key, defaultUnit));
+            return;
+        }
+
+        UnsafeParallelAdapter<T, Object, Object> adapter =
+                (UnsafeParallelAdapter<T, Object, Object>) AdapterRegistry.find(be);
+
+        if (adapter == null) {
+            // No adapter → use standard path
+            submit(frame, new TickLoop() {
+                @Override public String id() { return key; }
+                @Override public void tick(SideEffectBuffer buf, MessageBus bus) { defaultUnit.run(); }
+            });
+            return;
+        }
+
+        // Snapshot on main thread (read-only)
+        var snapOpt = adapter.snapshot(be);
+        if (snapOpt.isEmpty()) {
+            // Could not snapshot → fallback to default unit via standard path to get crash/blacklist semantics
+            submit(frame, new TickLoop() {
+                @Override public String id() { return key; }
+                @Override public void tick(SideEffectBuffer buf, MessageBus bus) { defaultUnit.run(); }
+            });
+            return;
+        }
+        Object snapshot = snapOpt.get();
+
+        // Parallel compute
+        Future<?> f = pool.submit(() -> {
+            String computeKey = key + "#compute";
+            boolean okCompute = crashWrapper.runOrBlacklist(computeKey, () -> {
+                Object result = adapter.compute(snapshot);
+
+                // Defer commit to main thread, guarded as well
+                commitsLocal.get().add(() -> {
+                    String commitKey = key + "#commit";
+                    boolean okCommit = crashWrapper.runOrBlacklist(commitKey, () -> adapter.commit(be, result));
+                    if (!okCommit) {
+                        logger.accept("[Orchestrator] Commit failed for " + key + " (blacklisted commit).");
+                    }
+                });
+            });
+
+            if (!okCompute) {
+                // If compute failed/blacklisted, schedule fallback default tick on main
+                fallbackLocal.get().add(wrapSafeMain(key, defaultUnit));
+            }
+        });
+        futuresLocal.get().add(f);
+    }
+
     public void endTick(TickFrame frame, SideEffectContext ctx) {
         var futures = futuresLocal.get();
         for (Future<?> f : futures) {
@@ -79,16 +151,29 @@ public final class TickOrchestrator implements AutoCloseable {
         }
         futures.clear();
 
+        // Run any tasks that had to fall back to main-thread (original behavior)
         var fallbacks = fallbackLocal.get();
         for (Runnable r : fallbacks) {
             try {
                 r.run();
             } catch (Throwable t) {
-                logger.accept("[Orchestrator] Fallback task failed on main: " + t);
+                logger.accept("[Orchestrator] Main-thread fallback for task threw: " + t);
             }
         }
         fallbacks.clear();
 
+        // Run adapter commit tasks on main thread BEFORE applying side-effects
+        var commits = commitsLocal.get();
+        for (Runnable r : commits) {
+            try {
+                r.run();
+            } catch (Throwable t) {
+                logger.accept("[Orchestrator] Commit task failed on main: " + t);
+            }
+        }
+        commits.clear();
+
+        // Apply buffered side-effects (sorted) on main thread via context
         try {
             SideEffectApplier.applyAll(frame.buffer().drainSorted(), ctx);
         } catch (Exception e) {
@@ -115,4 +200,10 @@ public final class TickOrchestrator implements AutoCloseable {
         public SideEffectBuffer buffer() { return buffer; }
         public MessageBus bus() { return bus; }
     }
+
+    // TickLoop is assumed to be defined elsewhere in your codebase in the same package.
+    // public interface TickLoop {
+    //     String id();
+    //     void tick(SideEffectBuffer buffer, MessageBus bus);
+    // }
 }
