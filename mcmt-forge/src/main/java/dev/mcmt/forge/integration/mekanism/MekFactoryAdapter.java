@@ -6,6 +6,7 @@ import mekanism.api.AutomationType;
 import mekanism.api.math.FloatingLong;
 import mekanism.api.recipes.cache.CachedRecipe;
 import mekanism.common.capabilities.energy.MachineEnergyContainer;
+import mekanism.common.recipe.lookup.monitor.FactoryRecipeCacheLookupMonitor;
 import mekanism.common.tile.factory.TileEntityFactory;
 
 import java.util.ArrayList;
@@ -29,10 +30,11 @@ public class MekFactoryAdapter implements UnsafeParallelAdapter<TileEntityFactor
             int[] progressCopy = new int[slots];
             List<CachedRecipe<?>> cachedCopy = new ArrayList<>(slots);
 
-            // progress[] en recipeCacheLookupMonitors[] zijn via AT public gemaakt
             for (int i = 0; i < slots; i++) {
+                FactoryRecipeCacheLookupMonitor<?> monitor = be.recipeCacheLookupMonitors[i];
+                CachedRecipe<?> cached = monitor != null ? monitor.cachedRecipe : null;
+                cachedCopy.add(cached);
                 progressCopy[i] = be.progress[i];
-                cachedCopy.add(be.recipeCacheLookupMonitors[i]);
             }
 
             return Optional.of(new FactorySnapshot(energy, progressCopy, cachedCopy));
@@ -49,13 +51,12 @@ public class MekFactoryAdapter implements UnsafeParallelAdapter<TileEntityFactor
         for (int i = 0; i < newProgress.length; i++) {
             CachedRecipe<?> cached = snap.cachedRecipes().get(i);
             if (cached != null && cached.getRecipe() != null) {
-                // perTickEnergy en requiredTicks zijn via AT public gemaakt
                 FloatingLong perTickUsage = cached.perTickEnergy.get();
                 if (snap.energy().greaterOrEqual(perTickUsage)) {
                     newProgress[i]++;
                     energyDelta = energyDelta.subtract(perTickUsage);
                     if (newProgress[i] >= cached.requiredTicks.getAsInt()) {
-                        newProgress[i] = 0; // reset bij voltooiing
+                        newProgress[i] = 0;
                     }
                 }
             }
