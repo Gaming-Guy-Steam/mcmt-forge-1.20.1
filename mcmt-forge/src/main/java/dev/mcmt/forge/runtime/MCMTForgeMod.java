@@ -16,6 +16,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -56,8 +57,8 @@ public final class MCMTForgeMod {
         MinecraftForge.EVENT_BUS.addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStopping);
+        MinecraftForge.EVENT_BUS.addListener(this::registerCommands);
         MinecraftForge.EVENT_BUS.addListener(this::onServerTick);
-        MinecraftForge.EVENT_BUS.register(this);
     }
 
     @SubscribeEvent
@@ -70,7 +71,7 @@ public final class MCMTForgeMod {
                 config.maxThreads = suggested;
                 MCMTConfig.save(config);
                 System.out.println("[MCMT] First run detected. Setting maxThreads to "
-                        + suggested + " (cores: " + cores + ", reserved: " + DEFAULT_THREAD_RESERVE + ")");
+                    + suggested + " (cores: " + cores + ", reserved: " + DEFAULT_THREAD_RESERVE + ")");
             }
             AdapterRegistry.register(mekAdapter);
         });
@@ -110,78 +111,83 @@ public final class MCMTForgeMod {
         );
     }
 
-   @SubscribeEvent
-private void onServerStarted(ServerStartedEvent e) {
-    this.server = e.getServer();
+    @SubscribeEvent
+    private void onServerStarted(ServerStartedEvent e) {
+        this.server = e.getServer();
 
-    ForgeSideEffectContext ctx = new ForgeSideEffectContext(dimId -> {
-        ResourceLocation rl = ResourceLocation.tryParse(dimId);
-        if (rl == null) return null;
-        ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, rl);
-        return server.getLevel(key);
-    });
+        ForgeSideEffectContext ctx = new ForgeSideEffectContext(dimId -> {
+            ResourceLocation rl = ResourceLocation.tryParse(dimId);
+            if (rl == null) return null;
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, rl);
+            return server.getLevel(key);
+        });
 
-    this.orchestrator = new TickOrchestrator(
-        Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE,
-        new dev.mcmt.core.blacklist.BlacklistManager(
-            server.getWorldPath(LevelResource.ROOT).resolve("mcmt_blacklist.json"),
-            msg -> System.out.println("[MCMT-Blacklist] " + msg)
-        ),
-        msg -> System.out.println("[MCMT] " + msg)
-    );
+        int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE);
+        this.orchestrator = new TickOrchestrator(
+            threads,
+            new dev.mcmt.core.blacklist.BlacklistManager(
+                server.getWorldPath(LevelResource.ROOT).resolve("mcmt_blacklist.json"),
+                msg -> System.out.println("[MCMT-Blacklist] " + msg)
+            ),
+            msg -> System.out.println("[MCMT] " + msg)
+        );
 
-    // Scan alle werelden en registreer Mekanism factories
-    for (ServerLevel level : server.getAllLevels()) {
-        for (var ticker : level.tickableBlockEntities) { // via AT public gemaakt
-            if (ticker == null || ticker.getBlockEntity() == null) continue;
-            BlockEntity be = ticker.getBlockEntity();
-            if (be instanceof mekanism.common.tile.factory.TileEntityFactory<?>) {
-                AdapterRegistry.register(mekAdapter);
-                mekFactories.add(be);
+        mekFactories.clear();
+        for (ServerLevel level : server.getAllLevels()) {
+            for (var ticker : level.blockEntityTickers) { // via AT public gemaakt
+                if (ticker == null || ticker.getBlockEntity() == null) continue;
+                BlockEntity be = ticker.getBlockEntity();
+                if (be instanceof mekanism.common.tile.factory.TileEntityFactory<?>) {
+                    mekFactories.add(be);
+                }
             }
         }
+        System.out.println("[MCMT] Vooraf gedetecteerde Mekanism factories: " + mekFactories.size());
+
+        MinecraftForge.EVENT_BUS.addListener((TickEvent.LevelTickEvent ev) -> {
+            if (ev.phase != TickEvent.Phase.END) return;
+            if (!(ev.level instanceof ServerLevel sl)) return;
+
+            TickOrchestrator.TickFrame frame = orchestrator.beginTick();
+            int adapterCount = 0;
+
+            for (var ticker : sl.blockEntityTickers) { // via AT public gemaakt
+                if (ticker == null || ticker.getBlockEntity() == null) continue;
+                BlockEntity be = ticker.getBlockEntity();
+                if (!(be instanceof mekanism.common.tile.factory.TileEntityFactory<?>)) continue;
+
+                String beKey = be.getType().toString() + "@"
+                    + be.getBlockPos().getX() + ","
+                    + be.getBlockPos().getY() + ","
+                    + be.getBlockPos().getZ();
+
+                orchestrator.submitWithAdapter(frame, beKey, be, () -> {
+                    // Adapter doet het werk
+                });
+                adapterCount++;
+            }
+
+            orchestrator.endTick(frame, ctx);
+
+            if (adapterCount > 0) {
+                System.out.println("[MCMT] " + adapterCount +
+                    " Mekanism factories via adapters getickt in " +
+                    sl.dimension().location());
+            }
+        });
     }
 
-    // Tick-loop: alleen Mekanism factories via adapter
-    MinecraftForge.EVENT_BUS.addListener((TickEvent.LevelTickEvent ev) -> {
-        if (ev.phase != TickEvent.Phase.END) return;
-        if (!(ev.level instanceof ServerLevel sl)) return;
-
-        TickOrchestrator.TickFrame frame = orchestrator.beginTick();
-        int adapterCount = 0;
-
-        for (var ticker : sl.tickableBlockEntities) { // via AT public gemaakt
-            if (ticker == null || ticker.getBlockEntity() == null) continue;
-            BlockEntity be = ticker.getBlockEntity();
-            String beKey = be.getType().toString() + "@" +
-                           be.getBlockPos().getX() + "," +
-                           be.getBlockPos().getY() + "," +
-                           be.getBlockPos().getZ();
-
-            orchestrator.submitWithAdapter(frame, beKey, be, () -> {
-                // Adapter doet het werk
-            });
-            adapterCount++;
-        }
-
-        orchestrator.endTick(frame, ctx);
-
-        if (adapterCount > 0) {
-            System.out.println("[MCMT] " + adapterCount +
-                " Mekanism factories via adapters getickt in " +
-                sl.dimension().location());
-        }
-    });
-}
-
-
-
+    @SubscribeEvent
     private void onServerStopping(ServerStoppingEvent e) {
-        orchestrator = null;
-        server = null;
-        workers.shutdownNow();
+        try {
+            orchestrator = null;
+            server = null;
+        } finally {
+            workers.shutdownNow();
+        }
     }
 
+    @SubscribeEvent
     private void onServerTick(TickEvent.ServerTickEvent e) {
         // Eventueel globale server-taken
     }
