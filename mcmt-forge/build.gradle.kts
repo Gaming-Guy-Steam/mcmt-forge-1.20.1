@@ -10,6 +10,7 @@ java {
 
 minecraft {
     mappings("official", "1.20.1")
+    accessTransformer(file("src/main/resources/META-INF/accesstransformer.cfg"))
     runs {
         create("client") {
             workingDirectory(file("run"))
@@ -24,12 +25,25 @@ minecraft {
     }
 }
 
+repositories {
+    mavenCentral()
+    maven {
+        name = "ModMaven"
+        url = uri("https://modmaven.dev/")
+    }
+}
+
 dependencies {
     minecraft("net.minecraftforge:forge:1.20.1-47.1.0")
     implementation(project(":mcmt-core"))
-}
 
-// Neem de mcmt-core source direct op in de Forge build
+    compileOnly("mekanism:Mekanism:1.20.1-10.+")
+    compileOnly("mekanism:Mekanism:1.20.1-10.+:api")
+
+    
+    compileOnly(files("libs/MekanismExtras-1.20.1-1.+.jar"))
+} 
+
 sourceSets {
     main {
         java {

@@ -23,6 +23,7 @@ import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraft.world.level.storage.LevelResource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -69,7 +70,6 @@ public final class MCMTForgeMod {
                         + suggested + " (cores: " + cores + ", reserved: " + DEFAULT_THREAD_RESERVE + ")");
             }
 
-            // ✅ Registreer Mekanism Factory adapter
             AdapterRegistry.register(new MekFactoryAdapter());
         });
     }
@@ -132,38 +132,66 @@ public final class MCMTForgeMod {
         );
     }
 
-    private void onServerStarted(ServerStartedEvent e) {
-        this.server = e.getServer();
-        ForgeSideEffectContext ctx = new ForgeSideEffectContext(dimId -> {
-            ResourceLocation rl = ResourceLocation.tryParse(dimId);
-            if (rl == null) return null;
-            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, rl);
-            return server.getLevel(key);
-        });
+private void onServerStarted(ServerStartedEvent e) {
+    this.server = e.getServer();
 
-        // Maak orchestrator met blacklist en logger
-        this.orchestrator = new TickOrchestrator(
-            Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE,
-            new dev.mcmt.core.blacklist.BlacklistManager(),
-            msg -> System.out.println("[MCMT] " + msg)
-        );
+    // Adapter registreren (werkt nu met Mekanism 10.4)
+    AdapterRegistry.register(new MekFactoryAdapter());
 
-        // Voorbeeld BE‑tick loop integratie
-        MinecraftForge.EVENT_BUS.addListener((TickEvent.LevelTickEvent ev) -> {
-            if (ev.phase == TickEvent.Phase.START || !(ev.level instanceof ServerLevel sl)) return;
+    // Context voor side-effects
+    ForgeSideEffectContext ctx = new ForgeSideEffectContext(dimId -> {
+        ResourceLocation rl = ResourceLocation.tryParse(dimId);
+        if (rl == null) return null;
+        ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, rl);
+        return server.getLevel(key);
+    });
 
-            var frame = orchestrator.beginTick();
-            for (var be : sl.blockEntityList) {
-                String beKey = be.getType().toString() + "@" +
-                               be.getBlockPos().getX() + "," +
-                               be.getBlockPos().getY() + "," +
-                               be.getBlockPos().getZ();
-                Runnable defaultTick = be::tick;
-                orchestrator.submitWithAdapter(frame, beKey, be, defaultTick);
+    // TickOrchestrator aanmaken
+    this.orchestrator = new TickOrchestrator(
+        Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE,
+        new dev.mcmt.core.blacklist.BlacklistManager(
+            server.getWorldPath(LevelResource.ROOT).resolve("mcmt_blacklist.json"),
+            msg -> System.out.println("[MCMT-Blacklist] " + msg)
+        ),
+        msg -> System.out.println("[MCMT] " + msg)
+    );
+
+    // Luister naar LevelTickEvent
+    MinecraftForge.EVENT_BUS.addListener((TickEvent.LevelTickEvent ev) -> {
+        if (ev.phase != TickEvent.Phase.END) return;
+        if (!(ev.level instanceof ServerLevel sl)) return;
+
+        TickOrchestrator.TickFrame frame = orchestrator.beginTick();
+        int adapterCount = 0;
+
+        // Direct itereren over tickableBlockEntities dankzij AT
+        for (var ticker : sl.tickableBlockEntities) {
+            if (ticker == null || ticker.getBlockEntity() == null) continue;
+
+            var be = ticker.getBlockEntity();
+            String beKey = be.getType().toString() + "@" +
+                           be.getBlockPos().getX() + "," +
+                           be.getBlockPos().getY() + "," +
+                           be.getBlockPos().getZ();
+
+            Runnable defaultTick = be::tick;
+            orchestrator.submitWithAdapter(frame, beKey, be, defaultTick);
+
+            if (AdapterRegistry.find(be) != null) {
+                adapterCount++;
             }
-            orchestrator.endTick(frame, ctx);
-        });
-    }
+        }
+
+        orchestrator.endTick(frame, ctx);
+
+        if (adapterCount > 0) {
+            System.out.println("[MCMT] " + adapterCount +
+                " BlockEntities via adapters getickt in " +
+                sl.dimension().location());
+        }
+    });
+}
+
 
     private void onServerStopping(ServerStoppingEvent e) {
         orchestrator = null;

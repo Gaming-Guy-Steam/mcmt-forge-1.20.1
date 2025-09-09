@@ -2,38 +2,40 @@ package dev.mcmt.forge.integration.mekanism;
 
 import dev.mcmt.core.scheduling.UnsafeParallelAdapter;
 import mekanism.api.Action;
-import mekanism.api.inventory.IInventorySlot;
+import mekanism.api.AutomationType;
+import mekanism.api.math.FloatingLong;
 import mekanism.api.recipes.cache.CachedRecipe;
 import mekanism.common.capabilities.energy.MachineEnergyContainer;
 import mekanism.common.tile.factory.TileEntityFactory;
-import net.minecraft.server.level.ServerLevel;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public class MekFactoryAdapter implements UnsafeParallelAdapter<TileEntityFactory, MekFactoryAdapter.FactorySnapshot, MekFactoryAdapter.FactoryResult> {
+public class MekFactoryAdapter implements UnsafeParallelAdapter<TileEntityFactory<?>, MekFactoryAdapter.FactorySnapshot, MekFactoryAdapter.FactoryResult> {
 
     @Override
     public boolean matches(Object be) {
-        return be instanceof TileEntityFactory;
+        return be instanceof TileEntityFactory<?>;
     }
 
     @Override
-    public Optional<FactorySnapshot> snapshot(TileEntityFactory be) {
+    public Optional<FactorySnapshot> snapshot(TileEntityFactory<?> be) {
         try {
-            MachineEnergyContainer<TileEntityFactory> energyContainer = be.getEnergyContainer();
-            long energy = energyContainer.getEnergy();
-            int[] progress = be.getProgress().clone();
-            List<IInventorySlot> inputs = be.getInputSlots();
-            List<IInventorySlot> outputs = be.getOutputSlots();
-            CachedRecipe<?>[] cached = be.getCachedRecipes();
+            MachineEnergyContainer<?> energyContainer = be.getEnergyContainer();
+            FloatingLong energy = energyContainer.getEnergy();
 
-            String dimId = "minecraft:overworld";
-            if (be.getLevel() instanceof ServerLevel sl) {
-                dimId = sl.dimension().location().toString();
+            int slots = be.getSlots();
+            int[] progressCopy = new int[slots];
+            List<CachedRecipe<?>> cachedCopy = new ArrayList<>(slots);
+
+            // progress[] en recipeCacheLookupMonitors[] zijn via AT public gemaakt
+            for (int i = 0; i < slots; i++) {
+                progressCopy[i] = be.progress[i];
+                cachedCopy.add(be.recipeCacheLookupMonitors[i]);
             }
 
-            return Optional.of(new FactorySnapshot(dimId, energy, progress, inputs, outputs, cached));
+            return Optional.of(new FactorySnapshot(energy, progressCopy, cachedCopy));
         } catch (Exception e) {
             return Optional.empty();
         }
@@ -42,53 +44,40 @@ public class MekFactoryAdapter implements UnsafeParallelAdapter<TileEntityFactor
     @Override
     public FactoryResult compute(FactorySnapshot snap) {
         int[] newProgress = snap.progress().clone();
-        long energyDelta = 0;
+        FloatingLong energyDelta = FloatingLong.ZERO;
 
         for (int i = 0; i < newProgress.length; i++) {
-            CachedRecipe<?> cached = snap.cachedRecipes()[i];
-            if (cached == null) continue;
-
-            long perTickUsage = cached.getEnergyRequired();
-            if (snap.energy() + energyDelta < perTickUsage) continue;
-
-            newProgress[i]++;
-            energyDelta -= perTickUsage;
-
-            if (newProgress[i] >= cached.getTicksRequired()) {
-                newProgress[i] = 0;
-                cached.setFinished(true);
+            CachedRecipe<?> cached = snap.cachedRecipes().get(i);
+            if (cached != null && cached.getRecipe() != null) {
+                // perTickEnergy en requiredTicks zijn via AT public gemaakt
+                FloatingLong perTickUsage = cached.perTickEnergy.get();
+                if (snap.energy().greaterOrEqual(perTickUsage)) {
+                    newProgress[i]++;
+                    energyDelta = energyDelta.subtract(perTickUsage);
+                    if (newProgress[i] >= cached.requiredTicks.getAsInt()) {
+                        newProgress[i] = 0; // reset bij voltooiing
+                    }
+                }
             }
         }
-
-        return new FactoryResult(newProgress, energyDelta, snap.cachedRecipes());
+        return new FactoryResult(newProgress, energyDelta);
     }
 
     @Override
-    public void commit(TileEntityFactory be, FactoryResult result) {
-        try {
-            be.setProgress(result.newProgress());
+    public void commit(TileEntityFactory<?> be, FactoryResult result) {
+        MachineEnergyContainer<?> energyContainer = be.getEnergyContainer();
 
-            MachineEnergyContainer<TileEntityFactory> energyContainer = be.getEnergyContainer();
-            if (result.energyDelta() < 0) {
-                energyContainer.extract(-result.energyDelta(), Action.EXECUTE);
-            } else if (result.energyDelta() > 0) {
-                energyContainer.insert(result.energyDelta(), Action.EXECUTE);
-            }
+        if (result.energyDelta().compareTo(FloatingLong.ZERO) < 0) {
+            energyContainer.extract(FloatingLong.create(Math.abs(result.energyDelta().longValue())), Action.EXECUTE, AutomationType.INTERNAL);
+        } else if (result.energyDelta().compareTo(FloatingLong.ZERO) > 0) {
+            energyContainer.insert(result.energyDelta(), Action.EXECUTE, AutomationType.INTERNAL);
+        }
 
-            for (CachedRecipe<?> cached : result.cachedRecipes()) {
-                if (cached != null && cached.isFinished()) {
-                    cached.finishProcessing(be);
-                }
-            }
-
-            be.setChanged();
-        } catch (Exception e) {
-            e.printStackTrace();
+        for (int i = 0; i < result.newProgress().length; i++) {
+            be.progress[i] = result.newProgress()[i];
         }
     }
 
-    public record FactorySnapshot(String dimId, long energy, int[] progress,
-                                  List<IInventorySlot> inputs, List<IInventorySlot> outputs,
-                                  CachedRecipe<?>[] cachedRecipes) {}
-    public record FactoryResult(int[] newProgress, long energyDelta, CachedRecipe<?>[] cachedRecipes) {}
+    public record FactorySnapshot(FloatingLong energy, int[] progress, List<CachedRecipe<?>> cachedRecipes) {}
+    public record FactoryResult(int[] newProgress, FloatingLong energyDelta) {}
 }
