@@ -6,6 +6,7 @@ import dev.mcmt.core.scheduling.AdapterRegistry;
 import dev.mcmt.core.tick.TickOrchestrator;
 import dev.mcmt.forge.integration.ForgeSideEffectContext;
 import dev.mcmt.forge.integration.mekanism.MekFactoryAdapter;
+import mekanism.common.tile.factory.TileEntityFactory;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.Registries;
@@ -46,12 +47,12 @@ public final class MCMTForgeMod {
 
     public MCMTForgeMod() {
         this.workers = Executors.newFixedThreadPool(
-            Math.max(2, Runtime.getRuntime().availableProcessors() - 1),
-            r -> {
-                Thread t = new Thread(r, "MCMT-Worker");
-                t.setDaemon(true);
-                return t;
-            }
+                Math.max(2, Runtime.getRuntime().availableProcessors() - 1),
+                r -> {
+                    Thread t = new Thread(r, "MCMT-Worker");
+                    t.setDaemon(true);
+                    return t;
+                }
         );
 
         MinecraftForge.EVENT_BUS.addListener(this::onCommonSetup);
@@ -70,8 +71,8 @@ public final class MCMTForgeMod {
                 int suggested = Math.max(1, cores - DEFAULT_THREAD_RESERVE);
                 config.maxThreads = suggested;
                 MCMTConfig.save(config);
-                System.out.println("[MCMT] First run detected. Setting maxThreads to "
-                    + suggested + " (cores: " + cores + ", reserved: " + DEFAULT_THREAD_RESERVE + ")");
+                System.out.printf("[MCMT] First run detected. Setting maxThreads to %d (cores: %d, reserved: %d)%n",
+                        suggested, cores, DEFAULT_THREAD_RESERVE);
             }
             AdapterRegistry.register(mekAdapter);
         });
@@ -81,33 +82,33 @@ public final class MCMTForgeMod {
     public void registerCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
         dispatcher.register(Commands.literal("mcmt")
-            .requires(src -> src.hasPermission(2))
-            .then(Commands.literal("summary")
-                .executes(ctx -> {
-                    ctx.getSource().sendSuccess(() ->
-                        Component.literal("MCMT Summary: Threads=" + MCMTConfig.load().maxThreads), false);
-                    return 1;
-                }))
-            .then(Commands.literal("threads")
-                .then(Commands.literal("current")
-                    .then(Commands.argument("count", IntegerArgumentType.integer(1))
+                .requires(src -> src.hasPermission(2))
+                .then(Commands.literal("summary")
                         .executes(ctx -> {
-                            int count = IntegerArgumentType.getInteger(ctx, "count");
                             ctx.getSource().sendSuccess(() ->
-                                Component.literal("Set current session threads to " + count), true);
+                                    Component.literal("MCMT Summary: Threads=" + MCMTConfig.load().maxThreads), false);
                             return 1;
-                        })))
-                .then(Commands.literal("always")
-                    .then(Commands.argument("count", IntegerArgumentType.integer(1))
-                        .executes(ctx -> {
-                            int count = IntegerArgumentType.getInteger(ctx, "count");
-                            MCMTConfig config = MCMTConfig.load();
-                            config.maxThreads = count;
-                            MCMTConfig.save(config);
-                            ctx.getSource().sendSuccess(() ->
-                                Component.literal("Set max threads permanently to " + count), true);
-                            return 1;
-                        }))))
+                        }))
+                .then(Commands.literal("threads")
+                        .then(Commands.literal("current")
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> {
+                                            int count = IntegerArgumentType.getInteger(ctx, "count");
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("Set current session threads to " + count), true);
+                                            return 1;
+                                        })))
+                        .then(Commands.literal("always")
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> {
+                                            int count = IntegerArgumentType.getInteger(ctx, "count");
+                                            MCMTConfig config = MCMTConfig.load();
+                                            config.maxThreads = count;
+                                            MCMTConfig.save(config);
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("Set max threads permanently to " + count), true);
+                                            return 1;
+                                        }))))
         );
     }
 
@@ -124,23 +125,17 @@ public final class MCMTForgeMod {
 
         int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - DEFAULT_THREAD_RESERVE);
         this.orchestrator = new TickOrchestrator(
-            threads,
-            new dev.mcmt.core.blacklist.BlacklistManager(
-                server.getWorldPath(LevelResource.ROOT).resolve("mcmt_blacklist.json"),
-                msg -> System.out.println("[MCMT-Blacklist] " + msg)
-            ),
-            msg -> System.out.println("[MCMT] " + msg)
+                threads,
+                new dev.mcmt.core.blacklist.BlacklistManager(
+                        server.getWorldPath(LevelResource.ROOT).resolve("mcmt_blacklist.json"),
+                        msg -> System.out.println("[MCMT-Blacklist] " + msg)
+                ),
+                msg -> System.out.println("[MCMT] " + msg)
         );
 
         mekFactories.clear();
         for (ServerLevel level : server.getAllLevels()) {
-            for (var ticker : level.blockEntityTickers) { // via AT public gemaakt
-                if (ticker == null || ticker.getBlockEntity() == null) continue;
-                BlockEntity be = ticker.getBlockEntity();
-                if (be instanceof mekanism.common.tile.factory.TileEntityFactory<?>) {
-                    mekFactories.add(be);
-                }
-            }
+            collectMekanismFactories(level, mekFactories);
         }
         System.out.println("[MCMT] Vooraf gedetecteerde Mekanism factories: " + mekFactories.size());
 
@@ -151,15 +146,14 @@ public final class MCMTForgeMod {
             TickOrchestrator.TickFrame frame = orchestrator.beginTick();
             int adapterCount = 0;
 
-            for (var ticker : sl.blockEntityTickers) { // via AT public gemaakt
-                if (ticker == null || ticker.getBlockEntity() == null) continue;
-                BlockEntity be = ticker.getBlockEntity();
-                if (!(be instanceof mekanism.common.tile.factory.TileEntityFactory<?>)) continue;
+            for (TickingBlockEntity ticker : getBlockEntityTickers(sl)) {
+                BlockEntity be = getBlockEntityFromTicker(ticker);
+                if (!(be instanceof TileEntityFactory<?>)) continue;
 
-                String beKey = be.getType().toString() + "@"
-                    + be.getBlockPos().getX() + ","
-                    + be.getBlockPos().getY() + ","
-                    + be.getBlockPos().getZ();
+                String beKey = be.getType() + "@" +
+                        be.getBlockPos().getX() + "," +
+                        be.getBlockPos().getY() + "," +
+                        be.getBlockPos().getZ();
 
                 orchestrator.submitWithAdapter(frame, beKey, be, () -> {
                     // Adapter doet het werk
@@ -170,12 +164,43 @@ public final class MCMTForgeMod {
             orchestrator.endTick(frame, ctx);
 
             if (adapterCount > 0) {
-                System.out.println("[MCMT] " + adapterCount +
-                    " Mekanism factories via adapters getickt in " +
-                    sl.dimension().location());
+                System.out.printf("[MCMT] %d Mekanism factories via adapters getickt in %s%n",
+                        adapterCount, sl.dimension().location());
             }
         });
     }
+
+    private void collectMekanismFactories(ServerLevel level, List<BlockEntity> targetList) {
+        for (TickingBlockEntity ticker : getBlockEntityTickers(level)) {
+            BlockEntity be = getBlockEntityFromTicker(ticker);
+            if (be instanceof TileEntityFactory<?>) {
+                targetList.add(be);
+            }
+        }
+    }
+
+   private BlockEntity getBlockEntityFromTicker(TickingBlockEntity ticker) {
+    try {
+        var field = TickingBlockEntity.class.getDeclaredField("f_155251_");
+        field.setAccessible(true);
+        return (BlockEntity) field.get(ticker);
+    } catch (Exception e) {
+        e.printStackTrace();
+        return null;
+    }
+}
+
+   @SuppressWarnings("unchecked")
+   private List<TickingBlockEntity> getBlockEntityTickers(ServerLevel level) {
+    try {
+        var field = ServerLevel.class.getDeclaredField("blockEntityTickers");
+        field.setAccessible(true);
+        return (List<TickingBlockEntity>) field.get(level);
+    } catch (Exception e) {
+        e.printStackTrace();
+        return List.of();
+    }
+}
 
     @SubscribeEvent
     private void onServerStopping(ServerStoppingEvent e) {

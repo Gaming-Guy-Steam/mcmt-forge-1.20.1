@@ -1,6 +1,6 @@
 plugins {
     id("net.minecraftforge.gradle") version "6.0.24"
-    kotlin("jvm")
+    kotlin("jvm") version "1.9.10"
     java
 }
 
@@ -10,7 +10,9 @@ java {
 
 minecraft {
     mappings("official", "1.20.1")
-    accessTransformer(file("src/main/resources/META-INF/accesstransformer.cfg"))
+
+ accessTransformers("src/main/resources/META-INF/accesstransformer.cfg")
+
     runs {
         create("client") {
             workingDirectory(file("run"))
@@ -39,10 +41,8 @@ dependencies {
 
     compileOnly("mekanism:Mekanism:1.20.1-10.+")
     compileOnly("mekanism:Mekanism:1.20.1-10.+:api")
-
-    
     compileOnly(files("libs/MekanismExtras-1.20.1-1.+.jar"))
-} 
+}
 
 sourceSets {
     main {
