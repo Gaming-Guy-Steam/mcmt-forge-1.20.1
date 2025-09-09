@@ -1,0 +1,10 @@
+Manifest-Version: 1.0
+Specification-Title: Mekanism
+Specification-Vendor: Mekanism
+Specification-Version: 10.4.16
+Implementation-Title: Mekanism
+Implementation-Version: 10.4.16
+Implementation-Vendor: Mekanism
+Implementation-Timestamp: 2025-05-21T13:09:12+0000
+Automatic-Module-Name: mekanism
+

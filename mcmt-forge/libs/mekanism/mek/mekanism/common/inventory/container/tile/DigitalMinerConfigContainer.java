@@ -1,0 +1,25 @@
+package mekanism.common.inventory.container.tile;
+
+import mekanism.common.registries.MekanismContainerTypes;
+import mekanism.common.tile.machine.TileEntityDigitalMiner;
+import net.minecraft.world.entity.player.Inventory;
+
+public class DigitalMinerConfigContainer extends MekanismTileContainer<TileEntityDigitalMiner> {
+   public DigitalMinerConfigContainer(int id, Inventory inv, TileEntityDigitalMiner tile) {
+      super(MekanismContainerTypes.DIGITAL_MINER_CONFIG, id, inv, tile);
+   }
+
+   @Override
+   protected int getInventoryYOffset() {
+      return super.getInventoryYOffset() + 86;
+   }
+
+   @Override
+   protected void addSlots() {
+   }
+
+   @Override
+   protected void addContainerTrackers() {
+      this.tile.addConfigContainerTrackers(this);
+   }
+}

@@ -1,0 +1,82 @@
+package mekanism.common.item.gear;
+
+import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.ImmutableMultimap.Builder;
+import java.util.UUID;
+import java.util.function.Consumer;
+import mekanism.api.annotations.NothingNullByDefault;
+import mekanism.client.render.RenderPropertiesProvider;
+import mekanism.common.config.MekanismConfig;
+import mekanism.common.lib.attribute.AttributeCache;
+import mekanism.common.lib.attribute.IAttributeRefresher;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ArmorItem.Type;
+import net.minecraft.world.item.Item.Properties;
+import net.minecraftforge.client.extensions.common.IClientItemExtensions;
+import org.jetbrains.annotations.NotNull;
+
+public class ItemArmoredJetpack extends ItemJetpack implements IAttributeRefresher {
+   private static final ItemArmoredJetpack.ArmoredJetpackMaterial ARMORED_JETPACK_MATERIAL = new ItemArmoredJetpack.ArmoredJetpackMaterial();
+   private final AttributeCache attributeCache = new AttributeCache(
+      this, MekanismConfig.gear.armoredJetpackArmor, MekanismConfig.gear.armoredJetpackToughness, MekanismConfig.gear.armoredJetpackKnockbackResistance
+   );
+
+   public ItemArmoredJetpack(Properties properties) {
+      super(ARMORED_JETPACK_MATERIAL, properties);
+   }
+
+   @Override
+   public void initializeClient(@NotNull Consumer<IClientItemExtensions> consumer) {
+      consumer.accept(RenderPropertiesProvider.armoredJetpack());
+   }
+
+   public int m_40404_() {
+      return this.m_40401_().m_7366_(this.m_266204_());
+   }
+
+   public float m_40405_() {
+      return this.m_40401_().m_6651_();
+   }
+
+   @NotNull
+   public Multimap<Attribute, AttributeModifier> getAttributeModifiers(@NotNull EquipmentSlot slot, @NotNull ItemStack stack) {
+      return (Multimap<Attribute, AttributeModifier>)(slot == this.m_40402_() ? this.attributeCache.get() : ImmutableMultimap.of());
+   }
+
+   @Override
+   public void addToBuilder(Builder<Attribute, AttributeModifier> builder) {
+      UUID modifier = (UUID)f_265987_.get(this.m_266204_());
+      builder.put(Attributes.f_22284_, new AttributeModifier(modifier, "Armor modifier", this.m_40404_(), Operation.ADDITION));
+      builder.put(Attributes.f_22285_, new AttributeModifier(modifier, "Armor toughness", this.m_40405_(), Operation.ADDITION));
+      builder.put(Attributes.f_22278_, new AttributeModifier(modifier, "Armor knockback resistance", this.m_40401_().m_6649_(), Operation.ADDITION));
+   }
+
+   @NothingNullByDefault
+   private static class ArmoredJetpackMaterial extends ItemJetpack.JetpackMaterial {
+      @Override
+      public int m_7366_(Type armorType) {
+         return armorType == Type.CHESTPLATE ? MekanismConfig.gear.armoredJetpackArmor.getOrDefault() : 0;
+      }
+
+      @Override
+      public String m_6082_() {
+         return "mekanism:jetpack_armored";
+      }
+
+      @Override
+      public float m_6651_() {
+         return MekanismConfig.gear.armoredJetpackToughness.getOrDefault();
+      }
+
+      @Override
+      public float m_6649_() {
+         return MekanismConfig.gear.armoredJetpackKnockbackResistance.getOrDefault();
+      }
+   }
+}

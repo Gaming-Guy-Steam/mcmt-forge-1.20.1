@@ -1,0 +1,33 @@
+package mekanism.common.integration.lookingat.theoneprobe;
+
+import mcjty.theoneprobe.api.IProbeConfig;
+import mcjty.theoneprobe.api.IProbeConfigProvider;
+import mcjty.theoneprobe.api.IProbeHitData;
+import mcjty.theoneprobe.api.IProbeHitEntityData;
+import mekanism.common.capabilities.Capabilities;
+import mekanism.common.tile.base.TileEntityUpdateable;
+import mekanism.common.util.CapabilityUtils;
+import mekanism.common.util.WorldUtils;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class ProbeConfigProvider implements IProbeConfigProvider {
+   public static final ProbeConfigProvider INSTANCE = new ProbeConfigProvider();
+
+   public void getProbeConfig(IProbeConfig config, Player player, Level world, Entity entity, IProbeHitEntityData data) {
+   }
+
+   public void getProbeConfig(IProbeConfig config, Player player, Level world, BlockState blockState, IProbeHitData data) {
+      BlockEntity tile = WorldUtils.getTileEntity(world, data.getPos());
+      if (CapabilityUtils.getCapability(tile, Capabilities.STRICT_ENERGY, null).isPresent()) {
+         config.setRFMode(0);
+      }
+
+      if (tile instanceof TileEntityUpdateable) {
+         config.setTankMode(0);
+      }
+   }
+}

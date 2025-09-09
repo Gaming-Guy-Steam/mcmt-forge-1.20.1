@@ -1,0 +1,15 @@
+package mekanism.common.registries;
+
+import mekanism.common.registration.impl.HeightProviderTypeDeferredRegister;
+import mekanism.common.registration.impl.HeightProviderTypeRegistryObject;
+import mekanism.common.world.height.ConfigurableHeightProvider;
+
+public class MekanismHeightProviderTypes {
+   public static final HeightProviderTypeDeferredRegister HEIGHT_PROVIDER_TYPES = new HeightProviderTypeDeferredRegister("mekanism");
+   public static final HeightProviderTypeRegistryObject<ConfigurableHeightProvider> CONFIGURABLE = HEIGHT_PROVIDER_TYPES.register(
+      "configurable", ConfigurableHeightProvider.CODEC
+   );
+
+   private MekanismHeightProviderTypes() {
+   }
+}

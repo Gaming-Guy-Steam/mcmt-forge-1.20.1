@@ -1,0 +1,86 @@
+package mekanism.common.inventory.container.slot;
+
+import java.util.function.Consumer;
+import java.util.function.IntSupplier;
+import mekanism.common.inventory.container.IGUIWindow;
+import mekanism.common.inventory.container.SelectedWindowData;
+import mekanism.common.inventory.slot.BasicInventorySlot;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+public class VirtualInventoryContainerSlot extends InventoryContainerSlot implements IVirtualSlot {
+   private final SelectedWindowData windowData;
+   private IntSupplier xPositionSupplier = () -> this.f_40220_;
+   private IntSupplier yPositionSupplier = () -> this.f_40221_;
+   private ItemStack stackToRender = ItemStack.f_41583_;
+   @Nullable
+   private String tooltipOverride;
+   private boolean shouldDrawOverlay;
+   @Nullable
+   private IGUIWindow window;
+
+   public VirtualInventoryContainerSlot(
+      BasicInventorySlot slot, SelectedWindowData windowData, @Nullable SlotOverlay slotOverlay, Consumer<ItemStack> uncheckedSetter
+   ) {
+      super(slot, 0, 0, ContainerSlotType.IGNORED, slotOverlay, null, uncheckedSetter);
+      this.windowData = windowData;
+   }
+
+   @Override
+   public IGUIWindow getLinkedWindow() {
+      return this.window;
+   }
+
+   @Override
+   public int getActualX() {
+      return this.xPositionSupplier.getAsInt();
+   }
+
+   @Override
+   public int getActualY() {
+      return this.yPositionSupplier.getAsInt();
+   }
+
+   @Override
+   public void updatePosition(@Nullable IGUIWindow window, IntSupplier xPositionSupplier, IntSupplier yPositionSupplier) {
+      this.xPositionSupplier = xPositionSupplier;
+      this.yPositionSupplier = yPositionSupplier;
+      this.window = window;
+   }
+
+   @Override
+   public void updateRenderInfo(@NotNull ItemStack stackToRender, boolean shouldDrawOverlay, @Nullable String tooltipOverride) {
+      this.stackToRender = stackToRender;
+      this.shouldDrawOverlay = shouldDrawOverlay;
+      this.tooltipOverride = tooltipOverride;
+   }
+
+   @NotNull
+   @Override
+   public ItemStack getStackToRender() {
+      return this.stackToRender;
+   }
+
+   @Override
+   public boolean shouldDrawOverlay() {
+      return this.shouldDrawOverlay;
+   }
+
+   @Nullable
+   @Override
+   public String getTooltipOverride() {
+      return this.tooltipOverride;
+   }
+
+   @Override
+   public Slot getSlot() {
+      return this;
+   }
+
+   @Override
+   public boolean exists(@Nullable SelectedWindowData windowData) {
+      return this.windowData.equals(windowData);
+   }
+}

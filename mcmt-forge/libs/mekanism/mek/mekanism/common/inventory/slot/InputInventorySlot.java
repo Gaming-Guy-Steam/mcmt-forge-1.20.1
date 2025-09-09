@@ -1,0 +1,33 @@
+package mekanism.common.inventory.slot;
+
+import java.util.Objects;
+import java.util.function.Predicate;
+import mekanism.api.IContentsListener;
+import mekanism.api.annotations.NothingNullByDefault;
+import mekanism.common.inventory.container.slot.ContainerSlotType;
+import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.Nullable;
+
+@NothingNullByDefault
+public class InputInventorySlot extends BasicInventorySlot {
+   public static InputInventorySlot at(@Nullable IContentsListener listener, int x, int y) {
+      return at(alwaysTrue, listener, x, y);
+   }
+
+   public static InputInventorySlot at(Predicate<ItemStack> isItemValid, @Nullable IContentsListener listener, int x, int y) {
+      return at(alwaysTrue, isItemValid, listener, x, y);
+   }
+
+   public static InputInventorySlot at(
+      Predicate<ItemStack> insertPredicate, Predicate<ItemStack> isItemValid, @Nullable IContentsListener listener, int x, int y
+   ) {
+      Objects.requireNonNull(insertPredicate, "Insertion check cannot be null");
+      Objects.requireNonNull(isItemValid, "Item validity check cannot be null");
+      return new InputInventorySlot(insertPredicate, isItemValid, listener, x, y);
+   }
+
+   protected InputInventorySlot(Predicate<ItemStack> insertPredicate, Predicate<ItemStack> isItemValid, @Nullable IContentsListener listener, int x, int y) {
+      super(notExternal, (stack, automationType) -> insertPredicate.test(stack), isItemValid, listener, x, y);
+      this.setSlotType(ContainerSlotType.INPUT);
+   }
+}
